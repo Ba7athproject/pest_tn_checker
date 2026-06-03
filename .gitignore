@@ -1,0 +1,90 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Pytest / unit tests cache
+.pytest_cache/
+.tox/
+.nosexy
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+htmlcov/
+
+# Local environment configuration
+.env
+.env.local
+.env.development
+.env.staging
+.env.production
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE / VS Code user-specific settings (excluding shared settings.json)
+.vscode/*
+!.vscode/settings.json
+
+# Large media / recording files
+*.mp4
+*.webm
+*.avi
+*.mov
+
+# Pipeline local data directories (cache and downloads)
+data/reference/
+data/output/
+
+# Ignore intermediate data except for manual_mapping.csv
+data/interim/*
+!data/interim/manual_mapping.csv
+
+# Legacy / Duplicate root-level data files
+/eu_active_substances_full.csv
+/eu_active_substances_full.json
+/manual_mapping.csv
+/manual_review_queue.csv
+/pesticides_tn_checked.csv
+/pesticides_tn_checked2.csv
+/pesticides_tn_clean.csv
+/pesticides_tn_eu_2_review.csv
+/pesticides_tn_reconciled.csv
+/eu_substances_cache.json
+/eu_active_substances.json
+
+# Legacy / Preparation scripts in root
+/test_api.py
+/download_db.py
+/eu_pesticides.py
+/eu_pesticides_checker.py
