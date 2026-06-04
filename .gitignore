@@ -88,3 +88,4 @@ data/interim/*
 /download_db.py
 /eu_pesticides.py
 /eu_pesticides_checker.py
+scratch/

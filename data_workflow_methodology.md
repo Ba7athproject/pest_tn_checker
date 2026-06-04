@@ -6,6 +6,11 @@ Ce document présente en détail le fonctionnement méthodologique et technique 
 
 ## Architecture Générale du Workflow
 
+![Architecture Générale du Workflow](data/architecture_generale.png)
+
+<details>
+<summary>Source Mermaid de l'Architecture</summary>
+
 ```mermaid
 graph TD
     A[Base API de l'Union Européenne] -->|01_download_db.py| B[(Référence EU CSV & JSON)]
@@ -21,6 +26,8 @@ graph TD
     L --> M[Calcul de l'Homologation Produit]
     M --> N[(Dataset Final Conforme)]
 ```
+</details>
+
 
 ---
 
@@ -67,22 +74,66 @@ Pour chaque substance active extraite de chaque produit commercial, le pipeline 
 
 ## Étape 4 : Revue Manuelle par l'Opérateur
 
-* L'utilisateur ouvre le fichier `data/interim/manual_review_queue.csv` dans son tableur préféré.
-* Pour chaque substance en suspens (indiquée par `review` ou `review_accept_high_score`) :
-  * L'utilisateur vérifie les suggestions et modifie la décision dans la colonne `review_decision_i` par **`accept`** ou **`reject`**.
-  * S'il accepte, il copie/colle le nom officiel de l'UE suggéré dans la colonne `review_match_name_i`. Des hyperliens vers la base de données de l'UE sont automatiquement insérés dans le CSV pour lui permettre de vérifier rapidement les fiches.
-  * Il enregistre et ferme le fichier CSV.
+* L'utilisateur ouvre le fichier `data/interim/manual_review_queue.csv` dans son tableur ou éditeur CSV.
+* Pour chaque substance active en suspens (repérée par les slots `substance_unit_i` et `substance_normalized_i`), il doit renseigner une décision réglementaire dans la colonne `review_decision_i` :
+  * **`accept`** : Valide le rapprochement de la substance. L'opérateur **doit** alors copier/coller le nom officiel de la substance de référence de l'UE dans la colonne `review_match_name_i`. (Des hyperliens vers les fiches de l'UE sont fournis pour faciliter cette vérification).
+  * **`reject`** : Marque le rapprochement comme rejeté. La substance n'est pas réinjectée dans le cache historique, son statut final devient `"Rejected"` et le produit associé sera marqué non conforme.
+  * **`needs_research`** : Indique que la substance requiert plus de recherches. Son statut final reste `"Needs Research"`.
+  * *Vide* / **`review`** / **`review_accept_high_score`** : Conservent la substance dans l'état `"Pending Review"`.
+* L'utilisateur enregistre et ferme le fichier CSV.
 
 ---
 
 ## Étape 5 : Réinjection, Apprentissage et Homologation (`reinject_decisions.py`)
 
-Lorsque l'utilisateur lance l'étape de réinjection, le pipeline assemble les décisions et calcule la conformité finale du catalogue :
+Lorsque l'utilisateur lance le script de réinjection, le pipeline assemble les décisions prises par l'opérateur et compile le catalogue final.
 
-### A. Boucle d'Apprentissage (Feedback Loop)
-* Le script de réinjection extrait chaque décision `"accept"` de la file d'attente manuelle.
-* Il inscrit ces nouvelles associations (`Nom Tunisien` $\rightarrow$ `Nom Officiel EU`) dans le fichier [manual_mapping.csv](file:///c:/Ba7ath_scripts/pesticides/data/interim/manual_mapping.csv).
-* **Bénéfice** : Lors du prochain build de la file, ces substances seront résolues automatiquement sans aucune action humaine.
+### A. Mécanisme de Réinjection et Apprentissage (Feedback Loop)
+
+![Mécanisme de Réinjection et Apprentissage](data/workflow_reinjection_decisions.png)
+
+<details>
+<summary>Source Mermaid du Mécanisme de Réinjection</summary>
+
+```mermaid
+graph TD
+    A[Lire manual_review_queue.csv] --> B[Identifier les décisions review_decision_i]
+    B --> C{Valeur de la décision ?}
+    C -->|Autre que 'accept'| D[Pas d'enregistrement dans le mapping historique]
+    C -->|'accept' + nom UE renseigné| E[Enregistrer le couple dans le mapping historique]
+    
+    E --> F[Sauvegarder dans manual_mapping.csv]
+    E --> G[Interroger la base de référence de l'UE]
+    G --> H[Enrichir le catalogue avec les données réglementaires]
+    H --> I[Calculer product_is_approved et le niveau de risque global]
+    I --> J[Sauvegarder dans pesticides_tn_clean.csv]
+```
+</details>
+
+
+1. **Parcours de la File** : Le script parcourt la file d'attente manuelle et récupère les décisions prises pour chaque slot.
+2. **Apprentissage Actif** : Pour chaque décision **`accept`**, il met à jour le dictionnaire de correspondance historique en associant le nom tunisien nettoyé au nom officiel de l'UE.
+3. **Persistance du Cache** : Les nouvelles associations sont enregistrées dans le fichier [manual_mapping.csv](file:///c:/Ba7ath_scripts/pesticides/data/interim/manual_mapping.csv). Lors de la prochaine exécution de la file d'attente (`build_manual_review_queue.py`), ces substances seront automatiquement résolues comme `"auto_mapped"` sans action humaine.
+
+### B. Informations Injectées dans les Fichiers de Sortie
+
+Le processus de réinjection enrichit et met à jour deux fichiers clés :
+
+#### 1. Dans le cache historique [manual_mapping.csv](file:///c:/Ba7ath_scripts/pesticides/data/interim/manual_mapping.csv)
+Il enregistre la correspondance générique :
+* **`source_name`** : Le nom normalisé d'origine tunisienne (ex: `huile de neem`).
+* **`eu_name`** : Le nom officiel de la substance active tel qu'il apparaît dans la base de l'UE (ex: `NEEM SEED OIL REFINED`).
+
+#### 2. Dans le catalogue final [pesticides_tn_clean.csv](file:///c:/Ba7ath_scripts/pesticides/data/output/pesticides_tn_clean.csv)
+Le script interroge la base européenne de référence [eu_active_substances_full.csv](file:///c:/Ba7ath_scripts/pesticides/data/reference/eu_active_substances_full.csv) pour les correspondances acceptées afin d'injecter dans chaque produit :
+* **`eu_substances_final`** : Le(s) nom(s) officiel(s) de(s) substance(s) active(s) associée(s).
+* **`eu_statuses_final`** : Le statut réglementaire consolidé de la substance (*Approved*, *Not approved*, *Expired*, *Banned*, etc.).
+* **`eu_approval_start` / `eu_approval_end`** : Les dates de début et de fin d'autorisation européenne.
+* **`eu_candidate_for_substitution`** : Indicateur booléen signalant si la substance est candidate à la substitution.
+* **`eu_is_low_risk`** : Booléen spécifiant si la substance est à faible risque.
+* **`eu_is_basic_substance`** : Booléen spécifiant si c'est une substance de base.
+* **`eu_regulatory_risk_flag`** : Un niveau de risque global calculé pour le produit commercial (*low*, *medium*, *high*).
+* **`product_is_approved`** : L'autorisation finale du produit commercial (*True* si toutes ses substances actives non vides sont approuvées par l'UE, sinon *False*).
 
 ### B. Classification Réglementaire Fine (`regulatory_classifier.py`)
 Le pipeline enrichit les données avec le contexte réglementaire européen de chaque substance :
@@ -96,5 +147,41 @@ Le pipeline enrichit les données avec le contexte réglementaire européen de c
 * **Règle d'Invariant** : Un produit commercial complet (qui peut contenir plusieurs substances) n'obtient l'approbation finale (`product_is_approved = True`) **que si toutes ses substances actives non vides** sont individuellement associées à des substances de référence approuvées par l'UE (statut exact `"Approved"`).
 * Si une seule substance active du produit est rejetée, expirée, interdite ou non approuvée, le produit entier est marqué `product_is_approved = False`.
 
+#### Focus : Workflow de Matching et Gestion des Substances "Not approved"
+
+Lorsqu'une substance active matche entre la base de données tunisienne et la base européenne, et que son statut dans l'UE est classé sous une catégorie de type **non approuvé** (e.g. `not approved`, `withdrawn`, `expired`, `banned`, `not renewed`), voici le parcours technique et logique appliqué :
+
+![Workflow de Matching et Gestion des Substances "Not approved"](data/workflow_matching_not_approved.png)
+
+<details>
+<summary>Source Mermaid du Workflow</summary>
+
+```mermaid
+graph TD
+    A[Substance Active Tunisienne] -->|Matching réussi| B{Statut de la substance dans l'UE ?}
+    B -->|Approved| C[Substance : 'Approved']
+    B -->|Not approved / Expired / Banned / Withdrawn / Not renewed| D[Substance : 'Not approved']
+    
+    D --> E[Substance : Niveau de risque = high]
+    D --> F[Produit Commercial : product_is_approved = False]
+    D --> G[Produit Commercial : eu_overall_status = CONTAINS_NOT_APPROVED_SUBSTANCE_IN_EU]
+    D --> H[Produit Commercial : eu_regulatory_risk_flag = high]
+    D --> I[Alerte : Ajout de la substance dans la colonne Substance alerte finale]
+```
+</details>
+
+
+1. **Extraction et Classification individuelle (Substance-level)** :
+   * La fonction `classify_status_eu` dans [match_engine.py](file:///c:/Ba7ath_scripts/pesticides/utils/match_engine.py) unifie tous les états non-autorisés sous le statut `"Not approved"`.
+   * Le script [regulatory_classifier.py](file:///c:/Ba7ath_scripts/pesticides/src/eu/regulatory_classifier.py) attribue le drapeau de risque réglementaire `eu_regulatory_risk_flag = "high"` pour cette substance.
+
+2. **Agrégation et Décision finale (Product-level)** :
+   * Dans [reinject_decisions.py](file:///c:/Ba7ath_scripts/pesticides/scripts/reinject_decisions.py), si un produit commercial contient la substance en question, l'invariant d'homologation échoue :
+     * **`product_is_approved`** passe à **`False`** (car `all(s == "Approved" for s in resolved_statuses)` renvoie faux).
+     * **`eu_overall_status`** prend la valeur **`CONTAINS_NOT_APPROVED_SUBSTANCE_IN_EU`**.
+     * **`eu_regulatory_risk_flag`** du produit est marqué à **`high`**.
+     * La substance en alerte est répertoriée dans la colonne **`Substance alerte finale`** sous le format `nom_substance (Not approved)`.
+
 ### D. Export du Catalogue Final
 Toutes les métadonnées consolidées et les statuts détaillés sont enregistrés dans le catalogue final [pesticides_tn_clean.csv](file:///c:/Ba7ath_scripts/pesticides/data/output/pesticides_tn_clean.csv).
+
