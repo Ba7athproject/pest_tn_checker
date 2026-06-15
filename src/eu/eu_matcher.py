@@ -68,7 +68,8 @@ class EUMatcher:
             "match_score_pct": round(score, 2),
             "eu_status": record.get("substance_status", "Unknown"),
             "eu_cas_number": str(record.get("as_cas_number", "")).strip(),
-            "eu_category": record.get("substance_category", "")
+            "eu_category": record.get("substance_category", ""),
+            "eu_source_url": record.get("pest_res_linked_legislation_url", "")
         }
 
 # --- TEST ---
